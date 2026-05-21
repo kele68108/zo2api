@@ -16,6 +16,7 @@ log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
 SERVICE_NAME="zo-proxy"
 DEFAULT_DIR="/opt/zo-proxy"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 ENV_FILE=""
 
 detect_install() {
@@ -34,18 +35,14 @@ is_installed() {
     [[ -n "$ENV_FILE" && -f "$ENV_FILE" ]]
 }
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  读取当前 .env 变量
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 read_env() {
     if [[ ! -f "$ENV_FILE" ]]; then return 1; fi
-    ZO_ACCESS_TOKEN=$(grep "^ZO_ACCESS_TOKEN=" "$ENV_FILE" | cut -d= -f2-)
-    PORT=$(grep "^PORT=" "$ENV_FILE" | cut -d= -f2-)
-    PROXY_API_KEY=$(grep "^PROXY_API_KEY=" "$ENV_FILE" | cut -d= -f2-)
-    PROMPT_OVERRIDE=$(grep "^PROXY_PROMPT_OVERRIDE=" "$ENV_FILE" | cut -d= -f2-)
-    OUTPUT_SANITIZE=$(grep "^PROXY_OUTPUT_SANITIZE=" "$ENV_FILE" | cut -d= -f2-)
-    INSTALL_DIR=$(grep "^WORKING_DIR=" "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+    ZO_ACCESS_TOKEN=$(sed -n 's/^ZO_ACCESS_TOKEN=//p' "$ENV_FILE")
+    PORT=$(sed -n 's/^PORT=//p' "$ENV_FILE")
+    PROXY_API_KEY=$(sed -n 's/^PROXY_API_KEY=//p' "$ENV_FILE")
+    PROMPT_OVERRIDE=$(sed -n 's/^PROXY_PROMPT_OVERRIDE=//p' "$ENV_FILE")
+    OUTPUT_SANITIZE=$(sed -n 's/^PROXY_OUTPUT_SANITIZE=//p' "$ENV_FILE")
+    INSTALL_DIR=$(sed -n 's/^WORKING_DIR=//p' "$ENV_FILE")
     [[ -z "$INSTALL_DIR" ]] && INSTALL_DIR=$(dirname "$ENV_FILE")
 }
 
@@ -126,12 +123,12 @@ do_install() {
     echo -e "${BOLD}══════════════════════════════════════${NC}"
     echo -e "${BOLD}  请确认以下配置:${NC}"
     echo -e "${BOLD}══════════════════════════════════════${NC}"
-    echo "  ZO_ACCESS_TOKEN : ${CYAN}${ZO_ACCESS_TOKEN}${NC}"
-    echo "  服务端口        : ${CYAN}${PORT}${NC}"
-    echo "  API 密钥        : ${CYAN}${PROXY_API_KEY}${NC}"
-    echo "  越狱防护        : ${CYAN}${PROMPT_OVERRIDE}${NC}"
-    echo "  输出清理        : ${CYAN}${OUTPUT_SANITIZE}${NC}"
-    echo "  安装目录        : ${CYAN}${INSTALL_DIR}${NC}"
+    echo -e "  ZO_ACCESS_TOKEN : ${CYAN}${ZO_ACCESS_TOKEN}${NC}"
+    echo -e "  服务端口        : ${CYAN}${PORT}${NC}"
+    echo -e "  API 密钥        : ${CYAN}${PROXY_API_KEY}${NC}"
+    echo -e "  越狱防护        : ${CYAN}${PROMPT_OVERRIDE}${NC}"
+    echo -e "  输出清理        : ${CYAN}${OUTPUT_SANITIZE}${NC}"
+    echo -e "  安装目录        : ${CYAN}${INSTALL_DIR}${NC}"
     echo -e "${BOLD}══════════════════════════════════════${NC}"
     while true; do
         read -p "确认无误开始安装? [Y/n]: " -n 1 -r; echo
@@ -142,14 +139,12 @@ do_install() {
         esac
     done
 
-    # ── 检测系统 ──
     if [[ ! -f /etc/os-release ]]; then
         log_error "无法识别操作系统"; return
     fi
     source /etc/os-release
     OS=$ID
 
-    # ── 安装系统依赖 ──
     log_info "检测系统依赖 ..."
     NEED_UPDATE=0
     for cmd_spec in "curl:curl" "wget:wget" "openssl:openssl" "ss:iproute2" "git:git"; do
@@ -179,7 +174,6 @@ do_install() {
     done
     log_success "系统依赖检测完毕"
 
-    # ── 安装 Node.js ──
     log_info "检测 Node.js ..."
     if command -v node &>/dev/null; then
         NODE_MAJOR=$(node -v | cut -d'v' -f2 | cut -d. -f1)
@@ -209,7 +203,6 @@ do_install() {
         log_error "Node.js 安装失败"; return
     fi
 
-    # ── 写入文件 ──
     log_info "创建安装目录 $INSTALL_DIR"
     mkdir -p "$INSTALL_DIR"
 
@@ -262,7 +255,7 @@ function pipeZoStreamToOpenAI(zoStream,clientRes,requestModel,requestTools,proxy
 function pipeZoStreamToAnthropic(zoStream,clientRes,requestModel,requestTools,proxyInput='') { const msgId='msg_'+uuid();const hasTools=requestTools&&requestTools.length>0;let buffer='',eventType='',accumulatedText='',messageStarted=false,textBlockOpen=false,blockIndex=0,responseHeadersCollected=false;function collectHeaders(h){if(responseHeadersCollected)return;responseHeadersCollected=true;const cid=h['x-conversation-id'];if(cid)clientRes.setHeader('x-conversation-id',cid);}function emit(event,data){clientRes.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);}function startMessage(){if(messageStarted)return;messageStarted=true;emit('message_start',{type:'message_start',message:{id:msgId,type:'message',role:'assistant',model:requestModel,content:[],stop_reason:null,stop_sequence:null,usage:{input_tokens:0,output_tokens:0}}});}function startTextBlock(){if(textBlockOpen)return;textBlockOpen=true;emit('content_block_start',{type:'content_block_start',index:blockIndex,content_block:{type:'text',text:''}});}function closeTextBlock(){if(!textBlockOpen)return;emit('content_block_stop',{type:'content_block_stop',index:blockIndex});textBlockOpen=false;blockIndex++;}zoStream.on('response',(resp)=>{collectHeaders(resp.headers);if(resp.statusCode!==200){let body='';resp.on('data',c=>body+=c);resp.on('end',()=>{clientRes.writeHead(resp.statusCode,{'Content-Type':'application/json'});let msg='Zo API error';try{msg=JSON.parse(body).detail||JSON.parse(body).error||msg;}catch{}clientRes.end(JSON.stringify({type:'error',error:{type:'api_error',message:msg}}));});return;}clientRes.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-cache','Connection':'keep-alive'});resp.on('data',chunk=>{buffer+=chunk.toString();const lines=buffer.split('\n');buffer=lines.pop()||'';for(const line of lines){if(line.startsWith('event: ')){eventType=line.slice(7).trim();continue;}if(!line.startsWith('data: '))continue;const raw=line.slice(6).trim();if(!raw)continue;let ev;try{ev=JSON.parse(raw);}catch{continue;}if(eventType==='FrontendModelResponse'||ev.type==='FrontendModelResponse'){const content=(ev.parts&&ev.parts[0]&&ev.parts[0].content)||ev.data?.content||'';if(!content)continue;accumulatedText+=content;if(!hasTools){const cleanChunk=sanitizeOutput(content);if(cleanChunk){startMessage();startTextBlock();emit('content_block_delta',{type:'content_block_delta',index:blockIndex,delta:{type:'text_delta',text:cleanChunk}});}}}else if(eventType==='End'||ev.type==='End'){const rawParsed=parseZoOutput(accumulatedText.trim());rawParsed.__proxyInput=proxyInput;const parsed=normalizeParsedForClient(rawParsed,requestTools);const hasToolCalls=parsed.tool_calls&&parsed.tool_calls.length>0;const cleanText=sanitizeOutput(parsed.text||'');startMessage();if(hasTools){if(cleanText){startTextBlock();emit('content_block_delta',{type:'content_block_delta',index:blockIndex,delta:{type:'text_delta',text:cleanText}});closeTextBlock();}if(hasToolCalls){for(const tc of parsed.tool_calls){const mappedName=mapToolName(tc.name,requestTools);const mappedArgs=mapToolArgs(tc.arguments,mappedName,requestTools);const toolId='toolu_'+uuid().slice(0,24);emit('content_block_start',{type:'content_block_start',index:blockIndex,content_block:{type:'tool_use',id:toolId,name:mappedName,input:{}}});const argsJson=JSON.stringify(mappedArgs);if(argsJson&&argsJson!=='{}'){emit('content_block_delta',{type:'content_block_delta',index:blockIndex,delta:{type:'input_json_delta',partial_json:argsJson}});}emit('content_block_stop',{type:'content_block_stop',index:blockIndex});blockIndex++;}emit('message_delta',{type:'message_delta',delta:{stop_reason:'tool_use',stop_sequence:null},usage:{output_tokens:0}});}else{emit('message_delta',{type:'message_delta',delta:{stop_reason:'end_turn',stop_sequence:null},usage:{output_tokens:0}});}}else{closeTextBlock();emit('message_delta',{type:'message_delta',delta:{stop_reason:'end_turn',stop_sequence:null},usage:{output_tokens:0}});}emit('message_stop',{type:'message_stop'});}else if(eventType==='Error'||ev.type==='Error'){const msg=(ev.data&&ev.data.message)||'Unknown error';emit('error',{type:'error',error:{type:'api_error',message:msg}});}}});resp.on('end',()=>clientRes.end());resp.on('error',()=>clientRes.end());});zoStream.on('error',()=>{if(!clientRes.headersSent){clientRes.writeHead(502,{'Content-Type':'application/json'});clientRes.end(JSON.stringify({type:'error',error:{type:'api_error',message:'Failed to connect to Zo API'}}));}}); }
 async function handleOpenAIChat(req,res) { let body;try{body=await readBody(req);}catch(e){return sendError(res,400,'Invalid JSON body');}const requestModel=body.model||'unknown';const zoModel=mapModel(requestModel);const stream=!!body.stream;const convId=req.headers['x-conversation-id'];const tools=body.tools||body.functions;const wrapped=wrapInput(buildInputFromOpenAI(body.messages||[]));const{input:finalInput,outputFormat}=injectTools(wrapped,tools);const zoBody={input:finalInput,stream,__proxyInput:finalInput};if(zoModel)zoBody.model_name=zoModel;if(outputFormat)zoBody.output_format=outputFormat;else if(PROMPT_OVERRIDE&&!stream)zoBody.output_format=textOnlyOutputFormat();const extraHeaders={};if(convId)extraHeaders['x-conversation-id']=convId;if(stream&&tools&&tools.length>0){try{const result=await zoFetch('POST','/zo/ask',{...zoBody,stream:false},extraHeaders);if(result.status!==200){const msg=(result.body&&(result.body.detail||result.body.error))||'Zo API error';return sendError(res,result.status,msg);}const cid=result.headers['x-conversation-id'];if(cid)res.setHeader('x-conversation-id',cid);return writeOpenAIStreamFromZo(res,result.body,requestModel,tools);}catch(e){return sendError(res,502,`Zo API connection error: ${e.message}`);}}else if(stream){const zoStream=zoStreamRequest('POST','/zo/ask',zoBody,extraHeaders);pipeZoStreamToOpenAI(zoStream,res,requestModel,tools,finalInput);}else{try{const result=await zoFetch('POST','/zo/ask',zoBody,extraHeaders);if(result.status!==200){const msg=(result.body&&(result.body.detail||result.body.error))||'Zo API error';return sendError(res,result.status,msg);}const cid=result.headers['x-conversation-id'];if(cid)res.setHeader('x-conversation-id',cid);res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(openAIToZoOutput(result.body,requestModel,tools)));}catch(e){sendError(res,502,`Zo API connection error: ${e.message}`);}}}
 async function handleOpenAIModels(req,res) { try{const result=await zoFetch('GET','/models/available');if(result.status!==200)return sendError(res,result.status,'Failed to fetch models from Zo');const models=(result.body&&result.body.models)||[];res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({object:'list',data:models.map(m=>({id:m.model_name,object:'model',created:ts(),owned_by:m.vendor||'unknown'}))}));}catch(e){sendError(res,502,`Zo API connection error: ${e.message}`);} }
-async function handleAnthropicMessages(req,res) { let body;try{body=await readBody(req);}catch(e){return sendError(res,400,'Invalid JSON body','anthropic');}const requestModel=body.model||'unknown';const zoModel=mapModel(requestModel);const stream=!!body.stream;const convId=req.headers['x-conversation-id'];const tools=body.tools;const wrapped=wrapInput(buildInputFromAnthropic(body.system,body.messages||[]));const{input:finalInput,outputFormat}=injectTools(wrapped,tools);const zoBody={input:finalInput,stream,__proxyInput:finalInput};if(zoModel)zoBody.model_name=zoModel;if(outputFormat)zoBody.output_format=outputFormat;else if(PROMPT_OVERRIDE&&!stream)zoBody.output_format=textOnlyOutputFormat();const extraHeaders={};if(convId)extraHeaders['x-conversation-id']=convId;if(stream&&tools&&tools.length>0){try{const result=await zoFetch('POST','/zo/ask',{...zoBody,stream:false},extraHeaders);if(result.status!==200){const msg=(result.body&&(result.body.detail||result.body.error))||'Zo API error';return sendError(res,result.status,msg,'anthropic');}const cid=result.headers['x-conversation-id'];if(cid)res.setHeader('x-conversation-id',cid);return writeAnthropicStreamFromZo(res,result.body,requestModel,tools);}catch(e){return sendError(res,502,`Zo API connection error: ${e.message}`,  'anthropic');}}else if(stream){const zoStream=zoStreamRequest('POST','/zo/ask',zoBody,extraHeaders);pipeZoStreamToAnthropic(zoStream,res,requestModel,tools,finalInput);}else{try{const result=await zoFetch('POST','/zo/ask',zoBody,extraHeaders);if(result.status!==200){const msg=(result.body&&(result.body.detail||result.body.error))||'Zo API error';return sendError(res,result.status,msg,'anthropic');}const cid=result.headers['x-conversation-id'];if(cid)res.setHeader('x-conversation-id',cid);res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(anthropicToZoOutput(result.body,requestModel,tools)));}catch(e){sendError(res,502,`Zo API connection error: ${e.message}`,'anthropic');}}}
+async function handleAnthropicMessages(req,res) { let body;try{body=await readBody(req);}catch(e){return sendError(res,400,'Invalid JSON body','anthropic');}const requestModel=body.model||'unknown';const zoModel=mapModel(requestModel);const stream=!!body.stream;const convId=req.headers['x-conversation-id'];const tools=body.tools;const wrapped=wrapInput(buildInputFromAnthropic(body.system,body.messages||[]));const{input:finalInput,outputFormat}=injectTools(wrapped,tools);const zoBody={input:finalInput,stream,__proxyInput:finalInput};if(zoModel)zoBody.model_name=zoModel;if(outputFormat)zoBody.output_format=outputFormat;else if(PROMPT_OVERRIDE&&!stream)zoBody.output_format=textOnlyOutputFormat();const extraHeaders={};if(convId)extraHeaders['x-conversation-id']=convId;if(stream&&tools&&tools.length>0){try{const result=await zoFetch('POST','/zo/ask',{...zoBody,stream:false},extraHeaders);if(result.status!==200){const msg=(result.body&&(result.body.detail||result.body.error))||'Zo API error';return sendError(res,result.status,msg,'anthropic');}const cid=result.headers['x-conversation-id'];if(cid)res.setHeader('x-conversation-id',cid);return writeAnthropicStreamFromZo(res,result.body,requestModel,tools);}catch(e){return sendError(res,502,`Zo API connection error: ${e.message}`,'anthropic');}}else if(stream){const zoStream=zoStreamRequest('POST','/zo/ask',zoBody,extraHeaders);pipeZoStreamToAnthropic(zoStream,res,requestModel,tools,finalInput);}else{try{const result=await zoFetch('POST','/zo/ask',zoBody,extraHeaders);if(result.status!==200){const msg=(result.body&&(result.body.detail||result.body.error))||'Zo API error';return sendError(res,result.status,msg,'anthropic');}const cid=result.headers['x-conversation-id'];if(cid)res.setHeader('x-conversation-id',cid);res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(anthropicToZoOutput(result.body,requestModel,tools)));}catch(e){sendError(res,502,`Zo API connection error: ${e.message}`,'anthropic');}}}
 const server=http.createServer((req,res)=>{res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Access-Control-Allow-Methods','GET,POST,OPTIONS');res.setHeader('Access-Control-Allow-Headers','Content-Type,Authorization,x-conversation-id');if(req.method==='OPTIONS'){res.writeHead(204);return res.end();}if(!checkAuth(req,res))return;const url=new URL(req.url,`http://${req.headers.host}`);let path=url.pathname;if(path==='/v1/v1/messages')path='/v1/messages';if(path==='/messages')path='/v1/messages';if(path==='/chat/completions')path='/v1/chat/completions';if(path==='/models')path='/v1/models';if(req.method==='POST'&&path==='/v1/chat/completions')handleOpenAIChat(req,res);else if(req.method==='GET'&&path==='/v1/models')handleOpenAIModels(req,res);else if(req.method==='POST'&&path==='/v1/messages')handleAnthropicMessages(req,res);else sendError(res,404,`Not found: ${req.method} ${url.pathname}`);});
 server.listen(PORT,async()=>{console.log('');console.log('╔══════════════════════════════════════════════╗');console.log('║   ZoComputer API Reverse Proxy              ║');console.log('╠══════════════════════════════════════════════╣');console.log(`║   Base URL  : http://localhost:${PORT}`.padEnd(47)+'║');console.log(`║   API Key   : ${PROXY_API_KEY}`.padEnd(47)+'║');console.log(`║   Jailbreak : ${PROMPT_OVERRIDE?'ACTIVE (multi-layer)':'off'}`.padEnd(47)+'║');console.log(`║   Sanitizer : ${OUTPUT_SANITIZE?'on':'off'}`.padEnd(47)+'║');console.log('╚══════════════════════════════════════════════╝');console.log('');await cacheModels();});
 SERVERJS_EOF
@@ -287,7 +280,6 @@ exec node server.js
 STARTEOF
     chmod +x "$INSTALL_DIR/start.sh"
 
-    # ── systemd ──
     NODE_BIN=$(command -v node)
     log_info "配置 systemd 服务 ..."
     cat > "$SERVICE_FILE" << EOF
@@ -317,11 +309,21 @@ EOF
     systemctl enable ${SERVICE_NAME}
     log_success "systemd 服务已配置并设置开机自启"
 
+    # 快捷命令 zo
+    log_info "配置快捷命令 zo ..."
+    cat > /usr/local/bin/zo << EOF
+#!/bin/bash
+bash ${SCRIPT_PATH} \"\\\$@\"
+EOF
+    chmod +x /usr/local/bin/zo
+    log_success "快捷命令已创建: 输入 zo 即可打开管理脚本"
+
     echo ""
     log_success "安装完成！"
-    echo "  安装目录 : $INSTALL_DIR"
-    echo "  服务端口 : $PORT"
-    echo "  API 密钥 : $PROXY_API_KEY"
+    echo -e "  安装目录 : ${CYAN}${INSTALL_DIR}${NC}"
+    echo -e "  服务端口 : ${CYAN}${PORT}${NC}"
+    echo -e "  API 密钥 : ${CYAN}${PROXY_API_KEY}${NC}"
+    echo -e "  快捷命令 : ${CYAN}zo${NC}"
     echo ""
 
     read -p "是否立即启动服务? [Y/n]: " -n 1 -r; echo
@@ -339,7 +341,7 @@ EOF
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  2. 卸载（静默，不确认）
+#  2. 卸载（静默）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 do_uninstall_silent() {
@@ -356,6 +358,7 @@ do_uninstall_silent() {
         local dir=$(dirname "$ENV_FILE")
         rm -rf "$dir"
     fi
+    rm -f /usr/local/bin/zo
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -374,9 +377,10 @@ do_uninstall() {
 
     read_env
     echo -e "${BOLD}检测到以下安装信息:${NC}"
-    echo "  安装目录 : $INSTALL_DIR"
-    echo "  服务端口 : $PORT"
-    echo "  API 密钥 : $PROXY_API_KEY"
+    echo -e "  安装目录 : ${CYAN}${INSTALL_DIR}${NC}"
+    echo -e "  服务端口 : ${CYAN}${PORT}${NC}"
+    echo -e "  API 密钥 : ${CYAN}${PROXY_API_KEY}${NC}"
+    echo -e "  快捷命令 : ${CYAN}zo -> ${SCRIPT_PATH}${NC}"
     echo ""
 
     read -p "确认要完全卸载? 此操作不可恢复! 输入 YES 确认: " confirm
@@ -385,7 +389,7 @@ do_uninstall() {
     fi
 
     do_uninstall_silent
-    log_success "服务已停止、自启已取消、文件已删除"
+    log_success "服务已停止、自启已取消、文件已删除、快捷命令已移除"
 
     echo ""
     if command -v node &>/dev/null; then
@@ -424,11 +428,11 @@ do_modify() {
     read_env
 
     echo -e "${BOLD}当前配置:${NC}"
-    echo "  1. ZO_ACCESS_TOKEN   = ${CYAN}${ZO_ACCESS_TOKEN}${NC}"
-    echo "  2. PORT              = ${CYAN}${PORT}${NC}"
-    echo "  3. PROXY_API_KEY     = ${CYAN}${PROXY_API_KEY}${NC}"
-    echo "  4. PROMPT_OVERRIDE   = ${CYAN}${PROMPT_OVERRIDE}${NC}"
-    echo "  5. OUTPUT_SANITIZE   = ${CYAN}${OUTPUT_SANITIZE}${NC}"
+    echo -e "  1. ZO_ACCESS_TOKEN   = ${CYAN}${ZO_ACCESS_TOKEN}${NC}"
+    echo -e "  2. PORT              = ${CYAN}${PORT}${NC}"
+    echo -e "  3. PROXY_API_KEY     = ${CYAN}${PROXY_API_KEY}${NC}"
+    echo -e "  4. PROMPT_OVERRIDE   = ${CYAN}${PROMPT_OVERRIDE}${NC}"
+    echo -e "  5. OUTPUT_SANITIZE   = ${CYAN}${OUTPUT_SANITIZE}${NC}"
     echo ""
 
     read -p "请输入要修改的变量编号 (1-5，留空取消): " choice
@@ -483,7 +487,6 @@ do_modify() {
             ;;
     esac
 
-    # 写入 .env
     cat > "$ENV_FILE" << EOF
 ZO_ACCESS_TOKEN=$ZO_ACCESS_TOKEN
 PORT=$PORT
@@ -494,7 +497,6 @@ WORKING_DIR=$INSTALL_DIR
 EOF
     chmod 600 "$ENV_FILE"
 
-    # 重启服务使其生效
     if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
         log_info "重启服务使配置生效 ..."
         systemctl restart "$SERVICE_NAME"
@@ -523,7 +525,6 @@ do_service() {
         return
     fi
 
-    # 显示当前状态
     if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
         echo -e "当前状态: ${GREEN}运行中${NC}"
     else
@@ -575,20 +576,22 @@ main_menu() {
         echo -e "${CYAN}╔═══════════════════════════════════════════════╗${NC}"
         echo -e "${CYAN}║     Zo Computer API 反向代理管理脚本          ║${NC}"
         echo -e "${CYAN}╠═══════════════════════════════════════════════╣${NC}"
-        echo -e "${CYAN}║${NC}  1. 安装 Zo Computer API 反向代理            ${CYAN}║${NC}"
-        echo -e "${CYAN}║${NC}  2. 卸载 Zo Computer API 反向代理            ${CYAN}║${NC}"
-        echo -e "${CYAN}║${NC}  3. 修改 Zo Computer API 变量                ${CYAN}║${NC}"
-        echo -e "${CYAN}║${NC}  4. Zo Computer API 服务管理                 ${CYAN}║${NC}"
-        echo -e "${CYAN}║${NC}  0. 退出                                     ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}  1. 安装 Zo Computer API 反向代理             ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}  2. 卸载 Zo Computer API 反向代理             ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}  3. 修改 Zo Computer API 变量                 ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}  4. Zo Computer API 服务管理                  ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}  0. 退出                                      ${CYAN}║${NC}"
         echo -e "${CYAN}╚═══════════════════════════════════════════════╝${NC}"
         echo ""
 
-        # 状态提示
         if is_installed; then
             read_env
             echo -e "  ${GREEN}● 已安装${NC}  端口:${PORT}  目录:${INSTALL_DIR}"
         else
             echo -e "  ${RED}○ 未安装${NC}"
+        fi
+        if [[ -x /usr/local/bin/zo ]]; then
+            echo -e "  ${CYAN}⚡ 快捷命令:${NC} zo"
         fi
         echo ""
 
